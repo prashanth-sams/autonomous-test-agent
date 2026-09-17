@@ -41,6 +41,7 @@ jobs:
         id: agent
         continue-on-error: true
         run: |
+          set +e
           node apps/web-agent/dist/cli.js pr \
             --config agent.example.yaml \
             --base "origin/${{ github.base_ref }}" \
@@ -48,6 +49,10 @@ jobs:
             --url "${PREVIEW_URL:-http://localhost:4321}" \
             --out runs \
             --quiet > agent-report.md
+          CODE=$?
+          set -e
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          exit $CODE
         env:
           PREVIEW_URL: ${{ vars.PREVIEW_URL }}
 
@@ -81,7 +86,7 @@ jobs:
       # so making the check required is a deliberate, separate decision.
       - name: Enforce the agent's recommendation
         run: |
-          if [ "${{ steps.agent.outcome }}" = "failure" ]; then
+          if [ "${{ steps.agent.outputs.code }}" = "2" ]; then
             echo "Agent recommended blocking this merge; see the PR comment for evidence."
             exit 1
           fi
