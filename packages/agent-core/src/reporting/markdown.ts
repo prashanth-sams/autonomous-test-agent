@@ -61,7 +61,12 @@ export function toMarkdown(summary: RunSummary): string {
   } else {
     lines.push(`### Defects (${summary.defects.length})`);
     lines.push('');
-    for (const defect of summary.defects) {
+    for (const [index, defect] of summary.defects.entries()) {
+      // A rule between defects, never a trailing one before the next section.
+      if (index > 0) {
+        lines.push('---');
+        lines.push('');
+      }
       lines.push(
         `#### ${defect.id} · ${defect.severity.toUpperCase()} · ${defect.title}`,
       );
