@@ -76,7 +76,16 @@ function report(output: Awaited<ReturnType<typeof runWebAgent>>, flags: Flags): 
     process.stdout.write(`\nReports: ${output.reports.html}\n`);
   }
   // CI reads the exit code; the report explains it.
-  return summary.recommendation === 'pass' ? 0 : summary.recommendation === 'review' ? 1 : 2;
+  switch (summary.recommendation) {
+    case 'pass':
+      return 0;
+    case 'review':
+      return 1;
+    case 'block':
+      return 2;
+    default:
+      return 3;
+  }
 }
 
 function buildOverrides(flags: Flags): Partial<AgentConfig> {

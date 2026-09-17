@@ -6,6 +6,7 @@ import type {
   ApplicationState,
   Finding,
   JourneyStep,
+  Mission,
 } from '@qa-agent/shared-contracts';
 import { recommend } from './agent';
 import { DefectRepository } from './defects/repository';
@@ -196,6 +197,33 @@ test('only reproduced high-severity defects can block a merge', () => {
 
 test('a clean run passes', () => {
   assert.equal(recommend([], config({ mode: 'blocking' })), 'pass');
+});
+
+test('a run whose every mission failed reports an error, not a pass', () => {
+  const mission = (status: Mission['status']): Mission => ({
+    id: `m-${status}`,
+    name: `mission ${status}`,
+    goal: 'exercise the fixture',
+    rationale: 'test fixture',
+    source: 'critical-journey',
+    priority: 1,
+    hints: [],
+    maxSteps: 5,
+    status,
+  });
+
+  // Nothing was tested, so an empty defect list proves nothing.
+  assert.equal(
+    recommend([], config({ mode: 'advisory' }), [mission('failed'), mission('failed')]),
+    'error',
+  );
+  // One mission that got through is enough for the defects to mean something.
+  assert.equal(
+    recommend([], config({ mode: 'advisory' }), [mission('failed'), mission('completed')]),
+    'pass',
+  );
+  // A run stopped by its budget has not errored.
+  assert.equal(recommend([], config({ mode: 'advisory' }), [mission('skipped')]), 'pass');
 });
 
 test('safety policy blocks destructive and prohibited actions', () => {

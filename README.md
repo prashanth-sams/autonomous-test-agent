@@ -145,6 +145,10 @@ when confidence is low. The PR comment explains the selection:
 ```
 
 Exit codes: `0` pass, `1` review, `2` block, `3` agent error.
+
+`3` also covers a run where every mission failed to execute. "The agent could
+not test this" is never reported as a pass — an empty defect list only means
+something when at least one mission actually ran.
 `.github/workflows/qa-agent.yml` wires this into GitHub Actions, uploads the
 evidence directory and keeps a single updated PR comment.
 

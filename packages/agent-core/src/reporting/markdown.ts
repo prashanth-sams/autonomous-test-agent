@@ -14,7 +14,9 @@ export function toMarkdown(summary: RunSummary): string {
       ? 'Passed'
       : summary.recommendation === 'review'
         ? 'Needs review'
-        : 'Failed';
+        : summary.recommendation === 'error'
+          ? 'Could not test'
+          : 'Failed';
   const lines: string[] = [];
 
   lines.push(`## QA Agent Result: ${verdict}`);
@@ -119,6 +121,11 @@ export function toMarkdown(summary: RunSummary): string {
 
 function recommendationText(summary: RunSummary): string {
   switch (summary.recommendation) {
+    case 'error':
+      return (
+        'No verdict — every mission failed to execute, so this run says nothing about the ' +
+        'application. Treat it as a broken agent or environment, not as a pass.'
+      );
     case 'block':
       return 'Block merge — a high-severity defect was reproduced from a clean state.';
     case 'review':

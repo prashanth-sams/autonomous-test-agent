@@ -118,7 +118,8 @@ export interface RunSummary {
   stepsExecuted: number;
   stoppedBecause: string;
   impact?: ImpactAnalysis;
-  recommendation: 'pass' | 'review' | 'block';
+  /** 'error' means the agent could not test the application, not that it found nothing. */
+  recommendation: 'pass' | 'review' | 'block' | 'error';
   costs: { aiCalls: number; aiInputTokens: number; aiOutputTokens: number };
 }
 
