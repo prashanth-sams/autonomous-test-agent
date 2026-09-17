@@ -1,0 +1,163 @@
+name: Autonomous Exploratory Test Agent
+description: Explore a web app with Playwright, analyze PR impact, and publish evidence-backed reports.
+author: Prashanth Samuel
+
+branding:
+  icon: search
+  color: blue
+
+inputs:
+  url:
+    description: URL of a running test or preview environment (never use production).
+    required: true
+  mode:
+    description: Run PR impact analysis (pr) or exploratory testing (explore).
+    required: false
+    default: pr
+  config:
+    description: Path to agent YAML/JSON config relative to the caller's repository root; optional.
+    required: false
+    default: ''
+  base:
+    description: Base git ref for PR impact analysis; defaults to origin/<PR base branch>.
+    required: false
+    default: ''
+  head:
+    description: Head git ref for PR impact analysis; defaults to the workflow SHA.
+    required: false
+    default: ''
+  changed-files:
+    description: Optional comma-separated changed paths, instead of running git diff.
+    required: false
+    default: ''
+  max-steps:
+    description: Optional maximum exploration steps; otherwise use the agent config.
+    required: false
+    default: ''
+  output-dir:
+    description: Directory for reports and evidence, relative to the caller's workspace.
+    required: false
+    default: qa-agent-runs
+  blocking:
+    description: Whether a reproduced blocking finding can fail the workflow. Review findings remain advisory.
+    required: false
+    default: 'false'
+  comment:
+    description: Post/update one PR comment (requires pull-requests write permission; skipped for fork PRs).
+    required: false
+    default: 'false'
+  upload-artifact:
+    description: Upload the reports and evidence as a workflow artifact.
+    required: false
+    default: 'true'
+
+outputs:
+  result:
+    description: Agent recommendation (pass, review, block, or error).
+    value: ${{ steps.agent.outputs.result }}
+  exit-code:
+    description: CLI exit code (0 pass, 1 review, 2 block, 3 error).
+    value: ${{ steps.agent.outputs.exit-code }}
+  run-dir:
+    description: Absolute directory for the completed run.
+    value: ${{ steps.agent.outputs.run-dir }}
+  report-markdown:
+    description: Absolute path to the Markdown report.
+    value: ${{ steps.agent.outputs.report-markdown }}
+  report-html:
+    description: Absolute path to the HTML report.
+    value: ${{ steps.agent.outputs.report-html }}
+  run-json:
+    description: Absolute path to the machine-readable JSON report.
+    value: ${{ steps.agent.outputs.run-json }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Build agent and install Chromium
+      shell: bash
+      run: |
+        cd "$GITHUB_ACTION_PATH"
+        npm ci
+        npm run build
+        npx playwright install --with-deps chromium
+
+    - name: Explore the application
+      id: agent
+      shell: bash
+      env:
+        AGENT_URL: ${{ inputs.url }}
+        AGENT_MODE: ${{ inputs.mode }}
+        AGENT_CONFIG: ${{ inputs.config }}
+        AGENT_BASE: ${{ inputs.base }}
+        AGENT_BASE_REF: ${{ github.base_ref }}
+        AGENT_HEAD: ${{ inputs.head }}
+        AGENT_SHA: ${{ github.sha }}
+        AGENT_CHANGED_FILES: ${{ inputs.changed-files }}
+        AGENT_MAX_STEPS: ${{ inputs.max-steps }}
+        AGENT_OUTPUT_DIR: ${{ inputs.output-dir }}
+        AGENT_BLOCKING: ${{ inputs.blocking }}
+      run: node "$GITHUB_ACTION_PATH/scripts/action-runner.mjs"
+
+    - name: Upload testing evidence
+      if: ${{ always() && inputs.upload-artifact == 'true' && steps.agent.outputs.run-dir != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: autonomous-test-agent-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ steps.agent.outputs.run-dir }}
+        if-no-files-found: warn
+
+    - name: Update pull request report
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.agent.outputs.report-markdown != '' }}
+      uses: actions/github-script@v7
+      env:
+        REPORT_PATH: ${{ steps.agent.outputs.report-markdown }}
+      with:
+        script: |
+          const fs = require('node:fs');
+          const marker = '<!-- autonomous-test-agent-report -->';
+          const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+          const body = `${marker}\n${report.slice(0, 60000)}`;
+          const issue_number = context.issue.number;
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            ...context.repo, issue_number, per_page: 100,
+          });
+          const existing = comments.find(c =>
+            c.user?.login === 'github-actions[bot]' && c.body?.includes(marker)
+          );
+          if (existing) {
+            await github.rest.issues.updateComment({
+              ...context.repo, comment_id: existing.id, body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              ...context.repo, issue_number, body,
+            });
+          }
+
+    - name: Enforce blocking findings and execution failures
+      if: ${{ always() }}
+      shell: bash
+      env:
+        AGENT_EXIT_CODE: ${{ steps.agent.outputs.exit-code }}
+        AGENT_BLOCKING: ${{ inputs.blocking }}
+      run: |
+        case "$AGENT_EXIT_CODE" in
+          0|1) exit 0 ;;
+          2)
+            if [ "$AGENT_BLOCKING" = 'true' ]; then
+              echo 'Agent recommended blocking this merge; inspect the attached evidence.'
+              exit 1
+            fi
+            exit 0
+            ;;
+          *)
+            echo 'Autonomous Test Agent failed to execute; check earlier logs.'
+            exit 1
+            ;;
+        esac
