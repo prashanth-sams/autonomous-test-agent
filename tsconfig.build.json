@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared-contracts" },
+    { "path": "packages/agent-core" },
+    { "path": "executors/web-playwright" },
+    { "path": "apps/web-agent" },
+    { "path": "examples/demo-app" }
+  ]
+}

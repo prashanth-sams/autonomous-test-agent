@@ -1,0 +1,111 @@
+# Autonomous Web Testing Agent — configuration
+#
+# Everything the agent is allowed to do, and everything it cannot infer on its
+# own (business rules, critical journeys), lives here.
+
+target:
+  baseUrl: http://localhost:4321
+  build: local
+
+# Layer 1 of scope selection: these always run, whatever impact analysis says.
+criticalJourneys:
+  - id: checkout
+    name: Checkout
+    goal: A customer can place an order and see a confirmation
+    startUrl: /checkout
+    hints: [checkout, order, card, pay]
+    script:
+      - { kind: goto, value: /checkout }
+      - { kind: fill, selector: '#name', value: QA Agent }
+      - { kind: fill, selector: '#email', value: qa.agent@example.com }
+      - { kind: fill, selector: '#card', value: '4111111111111111' }
+      - { kind: click, selector: '[data-testid=place-order]' }
+      - { kind: expectText, value: 'Order confirmed' }
+
+  - id: browse
+    name: Browse products
+    goal: A customer can browse products and reach the cart
+    startUrl: /products
+    hints: [product, cart, add]
+
+# Business invariants: the part no oracle can guess.
+rules:
+  - id: single-order-per-checkout
+    description: An order must never be created twice for one checkout
+    maxRequests: { method: POST, urlPattern: '/api/orders$', max: 1 }
+    severity: critical
+
+  - id: no-order-on-declined-payment
+    description: A declined payment must not create an order
+    route: /checkout
+    forbidText: 'Payment declined for order'
+    severity: critical
+
+  - id: no-delete-for-viewers
+    description: A viewer must not see the delete button
+    route: /profile
+    forbidElement: { role: button, name: delete }
+    severity: high
+
+limits:
+  maxSteps: 60
+  maxDurationMs: 600000
+  maxDefects: 25
+  verificationAttempts: 2
+  actionTimeoutMs: 8000
+
+safety:
+  allowedHosts: [localhost:4321]
+  prohibitedActions:
+    - complete real payment
+    - send customer email
+    - delete production data
+  destructiveKeywords: [delete, deactivate, wipe, purge]
+  allowDestructive: false
+  redactKeys: [password, token, secret, authorization, apiKey]
+
+# Layer 2 of scope selection: which code changes imply which journeys.
+impactMap:
+  - paths: ['examples/demo-app/src/**', 'web/components/Payment*']
+    area: Checkout / Payments
+    journeys: [checkout, payment retry, declined card]
+    confidence: 0.9
+  - paths: ['services/payment/**', 'api/payment-openapi.yaml']
+    area: Payments API
+    journeys: [checkout, refund status]
+    confidence: 0.8
+  - paths: ['packages/shared-auth/**']
+    area: Authentication
+    journeys: [login, session expiry, logout]
+    confidence: 0.85
+
+oracles:
+  consoleErrors: true
+  networkFailures: true
+  pageCrash: true
+  unresponsiveElements: true
+  brokenLinks: true
+  missingContent: true
+  accessibility: false
+  invariants: true
+  ignorePatterns: [favicon.ico, analytics, sentry]
+  ignoreStatusFor: []
+
+planner:
+  kind: heuristic
+
+browser:
+  name: chromium
+  headless: true
+  viewport: { width: 1280, height: 800 }
+
+# Fingerprints humans marked as false positives in earlier runs.
+knownFalsePositives: []
+
+reporting:
+  outputDir: runs
+  video: false
+  trace: true
+  har: false
+
+mode: advisory

@@ -1,0 +1,26 @@
+{
+  "name": "autonomous-test-agent",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Autonomous exploratory testing agents: one shared testing core, platform-specific executors. Web (Playwright) first.",
+  "workspaces": [
+    "packages/*",
+    "executors/*",
+    "apps/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "clean": "tsc -b tsconfig.build.json --clean && rm -rf */*/dist",
+    "typecheck": "tsc -b tsconfig.build.json",
+    "demo:serve": "node examples/demo-app/dist/server.js",
+    "explore": "node apps/web-agent/dist/cli.js explore",
+    "pr": "node apps/web-agent/dist/cli.js pr",
+    "test": "npm run build && node --test packages/agent-core/dist/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": { "node": ">=20" }
+}

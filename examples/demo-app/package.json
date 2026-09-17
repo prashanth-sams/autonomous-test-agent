@@ -1,0 +1,7 @@
+{
+  "name": "@qa-agent/demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/server.js",
+  "scripts": { "build": "tsc -b", "start": "node dist/server.js" }
+}

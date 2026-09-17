@@ -1,0 +1,87 @@
+# PR-driven autonomous exploratory testing.
+#
+# The agent reads the diff, maps it to affected journeys, explores them on the
+# preview environment and posts an evidence-backed recommendation on the PR.
+name: QA Agent
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The agent needs both sides of the diff to analyse impact.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+
+      # Replace with the real preview environment for the PR.
+      - name: Start the application under test
+        run: |
+          node examples/demo-app/dist/server.js &
+          npx wait-on http://localhost:4321 --timeout 30000
+
+      - name: Run the agent against the changed areas
+        id: agent
+        continue-on-error: true
+        run: |
+          node apps/web-agent/dist/cli.js pr \
+            --config agent.example.yaml \
+            --base "origin/${{ github.base_ref }}" \
+            --head "${{ github.sha }}" \
+            --url "${PREVIEW_URL:-http://localhost:4321}" \
+            --out runs \
+            --quiet > agent-report.md
+        env:
+          PREVIEW_URL: ${{ vars.PREVIEW_URL }}
+
+      - name: Publish evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-agent-evidence
+          path: runs/
+
+      - name: Comment on the pull request
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = require('node:fs').readFileSync('agent-report.md', 'utf8');
+            const marker = '<!-- qa-agent-report -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo, issue_number: context.issue.number,
+            });
+            // Update in place so a busy PR does not collect a wall of comments.
+            const existing = comments.find((c) => c.body.includes(marker));
+            const payload = `${marker}\n${body}`;
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body: payload });
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body: payload });
+            }
+
+      # Exit codes: 0 pass, 1 review, 2 block. Advisory mode never returns 2,
+      # so making the check required is a deliberate, separate decision.
+      - name: Enforce the agent's recommendation
+        run: |
+          if [ "${{ steps.agent.outcome }}" = "failure" ]; then
+            echo "Agent recommended blocking this merge; see the PR comment for evidence."
+            exit 1
+          fi

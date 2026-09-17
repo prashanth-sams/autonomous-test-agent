@@ -1,0 +1,15 @@
+{
+  "name": "@qa-agent/web-agent",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": { "qa-web-agent": "dist/cli.js" },
+  "scripts": { "build": "tsc -b" },
+  "dependencies": {
+    "@qa-agent/agent-core": "*",
+    "@qa-agent/shared-contracts": "*",
+    "@qa-agent/web-playwright": "*",
+    "yaml": "^2.7.0"
+  }
+}
