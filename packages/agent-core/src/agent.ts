@@ -100,8 +100,10 @@ export class ExplorationAgent {
   }
 
   async run(): Promise<RunSummary> {
-    await this.executor.start();
+    // start() is inside the try: it launches the browser before it navigates, so
+    // a failed start still has to reach stop() or the process never exits.
     try {
+      await this.executor.start();
       await this.authenticate();
       for (const mission of this.missions) {
         if (this.outOfBudget()) {

@@ -58,6 +58,9 @@ outputs:
   exit-code:
     description: CLI exit code (0 pass, 1 review, 2 block, 3 error).
     value: ${{ steps.agent.outputs.exit-code }}
+  run-id:
+    description: Identifier of the completed run.
+    value: ${{ steps.agent.outputs.run-id }}
   run-dir:
     description: Absolute directory for the completed run.
     value: ${{ steps.agent.outputs.run-dir }}
@@ -108,7 +111,7 @@ runs:
       if: ${{ always() && inputs.upload-artifact == 'true' && steps.agent.outputs.run-dir != '' }}
       uses: actions/upload-artifact@v4
       with:
-        name: autonomous-test-agent-${{ github.run_id }}-${{ github.run_attempt }}
+        name: autonomous-test-agent-${{ github.run_attempt }}-${{ steps.agent.outputs.run-id }}
         path: ${{ steps.agent.outputs.run-dir }}
         if-no-files-found: warn
 
