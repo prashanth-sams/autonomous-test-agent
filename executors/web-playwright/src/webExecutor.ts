@@ -89,7 +89,10 @@ export class WebExecutor implements PlatformExecutor, ReproducibleExecutor {
     const { config } = this.options;
     try {
       if (config.reporting.trace && this.context) {
-        await this.context.tracing.stop({ path: join(this.artifactsDir, 'trace.zip') });
+        // A run that failed during start may have no trace to write.
+        await this.context.tracing
+          .stop({ path: join(this.artifactsDir, 'trace.zip') })
+          .catch(() => undefined);
       }
       writeFileSync(join(this.artifactsDir, 'console.log'), this.consoleLog.join('\n'), 'utf8');
       await this.context?.close();

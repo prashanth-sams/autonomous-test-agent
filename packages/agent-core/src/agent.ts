@@ -73,6 +73,10 @@ export class ExplorationAgent {
   private readonly startedAt = Date.now();
   private steps = 0;
   private stoppedBecause = 'completed all missions';
+  /** Why each mission threw, in order — the first one explains an 'error' verdict. */
+  private readonly missionFailures: string[] = [];
+  /** Set when start or login failed, so no mission ever ran. */
+  private setupFailure?: string;
 
   constructor(options: AgentOptions) {
     this.config = options.config;
@@ -100,20 +104,22 @@ export class ExplorationAgent {
   }
 
   async run(): Promise<RunSummary> {
-    await this.executor.start();
+    // start() is inside the try: it launches the browser before it navigates, so
+    // a failed start still has to reach stop() or the process never exits.
     try {
-      await this.authenticate();
-      for (const mission of this.missions) {
-        if (this.outOfBudget()) {
-          // Say plainly why an area went untested; silence here is what makes
-          // teams distrust the agent.
-          this.stoppedBecause = this.stopReason();
-          mission.status = 'skipped';
-          continue;
+      if (await this.setUp()) {
+        for (const mission of this.missions) {
+          if (this.outOfBudget()) {
+            // Say plainly why an area went untested; silence here is what makes
+            // teams distrust the agent.
+            this.stoppedBecause = this.stopReason();
+            mission.status = 'skipped';
+            continue;
+          }
+          await this.runMission(mission);
         }
-        await this.runMission(mission);
+        await this.verifyDefects();
       }
-      await this.verifyDefects();
     } finally {
       await this.executor.stop();
     }
@@ -121,6 +127,31 @@ export class ExplorationAgent {
   }
 
   // --- mission execution -------------------------------------------------
+
+  /**
+   * Start the app and log in. A failure here is recorded rather than thrown, so
+   * the caller still gets a summary and writes the report: "could not log in"
+   * belongs in the PR comment, not only in a stack trace in the job log.
+   */
+  private async setUp(): Promise<boolean> {
+    let started = false;
+    try {
+      await this.executor.start();
+      started = true;
+      await this.authenticate();
+      return true;
+    } catch (error) {
+      const phase = started ? 'authentication' : 'start';
+      this.setupFailure = `${phase} failed: ${(error as Error).message}`;
+      this.log(this.setupFailure);
+      for (const mission of this.missions) mission.status = 'skipped';
+      if (started) {
+        // The page the login got stuck on is the evidence worth keeping.
+        await this.executor.captureEvidence('setup-failure').catch(() => []);
+      }
+      return false;
+    }
+  }
 
   private async authenticate(): Promise<void> {
     const auth = this.config.auth;
@@ -164,6 +195,7 @@ export class ExplorationAgent {
       if (mission.status === 'running') mission.status = 'completed';
     } catch (error) {
       mission.status = 'failed';
+      this.missionFailures.push(`${mission.name}: ${(error as Error).message}`);
       this.log(`mission ${mission.name} failed: ${(error as Error).message}`);
     }
   }
@@ -435,6 +467,12 @@ export class ExplorationAgent {
   private summarize(): RunSummary {
     const finishedAt = Date.now();
     const defects = this.defects.list();
+    const recommendation = this.setupFailure ? 'error' : recommend(defects, this.config, this.missions);
+    const stoppedBecause = this.setupFailure
+      ? this.setupFailure
+      : recommendation === 'error'
+        ? `every mission failed to execute (${this.missionFailures[0] ?? 'no reason recorded'})`
+        : this.stoppedBecause;
     return {
       runId: this.runId,
       startedAt: new Date(this.startedAt).toISOString(),
@@ -448,9 +486,9 @@ export class ExplorationAgent {
       defects,
       falsePositivesSuppressed: this.defects.suppressedCount,
       stepsExecuted: this.steps,
-      stoppedBecause: this.stoppedBecause,
+      stoppedBecause,
       impact: this.impact,
-      recommendation: recommend(defects, this.config),
+      recommendation,
       costs: this.planner.usage(),
     };
   }
@@ -463,8 +501,19 @@ export class ExplorationAgent {
 /**
  * Merge advice. Only defects that were actually reproduced can block, so a
  * one-off flake never stops a team from shipping.
+ *
+ * A run where every attempted mission threw is an 'error', never a 'pass':
+ * "the agent could not test this" must not look like "the agent found nothing".
  */
-export function recommend(defects: Defect[], config: AgentConfig): RunSummary['recommendation'] {
+export function recommend(
+  defects: Defect[],
+  config: AgentConfig,
+  missions: Mission[] = [],
+): RunSummary['recommendation'] {
+  const attempted = missions.filter((mission) => mission.status !== 'skipped');
+  if (attempted.length > 0 && attempted.every((mission) => mission.status === 'failed')) {
+    return 'error';
+  }
   const actionable = defects.filter(
     (defect) => defect.status === 'reproduced' || defect.status === 'unverified',
   );

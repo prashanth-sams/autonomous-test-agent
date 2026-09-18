@@ -71,7 +71,7 @@ export function toHtml(summary: RunSummary): string {
   main { max-width: 900px; margin: 0 auto; }
   h1 { font-size: 1.6rem; margin:0 0 4px; }
   .verdict { display:inline-block; padding:4px 12px; border-radius:999px; font-weight:600; color:#fff;
-             background:${summary.recommendation === 'pass' ? '#1f7a4d' : summary.recommendation === 'review' ? '#8a6b0a' : '#b3261e'}; }
+             background:${summary.recommendation === 'pass' ? '#1f7a4d' : summary.recommendation === 'review' ? '#8a6b0a' : summary.recommendation === 'error' ? '#5b6470' : '#b3261e'}; }
   .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:24px 0; }
   .stat { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
   .stat b { display:block; font-size:1.4rem; }

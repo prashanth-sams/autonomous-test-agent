@@ -68,13 +68,24 @@ async function main(): Promise<number> {
 function report(output: Awaited<ReturnType<typeof runWebAgent>>, flags: Flags): number {
   const { summary } = output;
   if (flags.json) {
-    process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+    // Machine consumers (the GitHub Action) need the paths, not just the verdict.
+    const payload = { ...summary, runDir: output.runDir, reports: output.reports };
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
   } else {
     process.stdout.write(`\n${readFileSync(output.reports.markdown, 'utf8')}\n`);
     process.stdout.write(`\nReports: ${output.reports.html}\n`);
   }
   // CI reads the exit code; the report explains it.
-  return summary.recommendation === 'pass' ? 0 : summary.recommendation === 'review' ? 1 : 2;
+  switch (summary.recommendation) {
+    case 'pass':
+      return 0;
+    case 'review':
+      return 1;
+    case 'block':
+      return 2;
+    default:
+      return 3;
+  }
 }
 
 function buildOverrides(flags: Flags): Partial<AgentConfig> {

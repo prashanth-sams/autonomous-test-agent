@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import type {
   Action,
@@ -6,8 +9,10 @@ import type {
   ApplicationState,
   Finding,
   JourneyStep,
+  Mission,
+  PlatformExecutor,
 } from '@qa-agent/shared-contracts';
-import { recommend } from './agent';
+import { ExplorationAgent, recommend } from './agent';
 import { DefectRepository } from './defects/repository';
 import { analyzeImpact, missionsFromImpact } from './impact/analyzer';
 import { StateMemory } from './memory/stateMemory';
@@ -196,6 +201,83 @@ test('only reproduced high-severity defects can block a merge', () => {
 
 test('a clean run passes', () => {
   assert.equal(recommend([], config({ mode: 'blocking' })), 'pass');
+});
+
+test('a run whose every mission failed reports an error, not a pass', () => {
+  const mission = (status: Mission['status']): Mission => ({
+    id: `m-${status}`,
+    name: `mission ${status}`,
+    goal: 'exercise the fixture',
+    rationale: 'test fixture',
+    source: 'critical-journey',
+    priority: 1,
+    hints: [],
+    maxSteps: 5,
+    status,
+  });
+
+  // Nothing was tested, so an empty defect list proves nothing.
+  assert.equal(
+    recommend([], config({ mode: 'advisory' }), [mission('failed'), mission('failed')]),
+    'error',
+  );
+  // One mission that got through is enough for the defects to mean something.
+  assert.equal(
+    recommend([], config({ mode: 'advisory' }), [mission('failed'), mission('completed')]),
+    'pass',
+  );
+  // A run stopped by its budget has not errored.
+  assert.equal(recommend([], config({ mode: 'advisory' }), [mission('skipped')]), 'pass');
+});
+
+test('a failed login still produces an error summary instead of throwing', async () => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'qa-agent-'));
+  const calls: string[] = [];
+  const executor: PlatformExecutor = {
+    platform: 'web',
+    name: 'stub',
+    start: async () => void calls.push('start'),
+    observe: async () => state(),
+    availableActions: async () => [],
+    execute: async () => {
+      throw new Error('no mission should run');
+    },
+    runScriptedStep: async () => ({
+      action: { id: 'login', kind: 'click', description: 'Log in' },
+      ok: false,
+      error: 'selector not found',
+      durationMs: 0,
+      stateBefore: 'state-0',
+      stateAfter: 'state-0',
+      noOp: true,
+      observations: [],
+    }),
+    captureEvidence: async (label) => {
+      calls.push(`evidence:${label}`);
+      return [];
+    },
+    drainObservations: () => [],
+    reset: async () => undefined,
+    stop: async () => void calls.push('stop'),
+  };
+
+  try {
+    const agent = new ExplorationAgent({
+      executor,
+      config: config({
+        auth: { steps: [{ kind: 'click', selector: '#login' }] },
+        reporting: { outputDir, video: false, trace: false, har: false },
+      }),
+    });
+    const summary = await agent.run();
+
+    assert.equal(summary.recommendation, 'error');
+    assert.match(summary.stoppedBecause, /^authentication failed: .*selector not found/);
+    assert.ok(summary.missions.every((mission) => mission.status === 'skipped'));
+    assert.deepEqual(calls, ['start', 'evidence:setup-failure', 'stop']);
+  } finally {
+    rmSync(outputDir, { recursive: true, force: true });
+  }
 });
 
 test('safety policy blocks destructive and prohibited actions', () => {

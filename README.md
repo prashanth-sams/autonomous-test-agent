@@ -145,8 +145,75 @@ when confidence is low. The PR comment explains the selection:
 ```
 
 Exit codes: `0` pass, `1` review, `2` block, `3` agent error.
+
+`3` also covers a run where every mission failed to execute. "The agent could
+not test this" is never reported as a pass — an empty defect list only means
+something when at least one mission actually ran.
 `.github/workflows/qa-agent.yml` wires this into GitHub Actions, uploads the
 evidence directory and keeps a single updated PR comment.
+
+## Use it as a GitHub Action
+
+This repository is also a composite action, so another repository can run the
+agent without vendoring any of it:
+
+```yaml
+name: QA Agent
+on: pull_request
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # impact analysis needs both sides of the diff
+
+      - uses: prashanth-sams/autonomous-test-agent@v1
+        with:
+          url: ${{ vars.PREVIEW_URL }}
+          config: qa/agent.yaml
+          comment: 'true'
+```
+
+The action builds the agent and installs Chromium itself; the caller supplies a
+running preview environment. Without `fetch-depth: 0` the agent cannot map the
+diff to journeys and broadens the scope instead of narrowing it.
+
+### Inputs
+
+| Input | Default | Purpose |
+| --- | --- | --- |
+| `url` | *required* | Base URL of a test or preview environment — never production |
+| `mode` | `pr` | `pr` for impact-driven testing, `explore` for a free exploratory run |
+| `config` | — | Agent config path, relative to the caller's repository root |
+| `base` / `head` | `origin/<base_ref>` / `github.sha` | Refs compared in `pr` mode |
+| `changed-files` | — | Comma-separated paths, instead of running `git diff` |
+| `max-steps` | — | Override the step budget from the config |
+| `output-dir` | `qa-agent-runs` | Where reports and evidence are written |
+| `blocking` | `false` | Allow a reproduced blocking defect to fail the job |
+| `comment` | `false` | Post/update one PR comment (needs `pull-requests: write`) |
+| `upload-artifact` | `true` | Upload the run directory as a workflow artifact |
+
+### Outputs
+
+| Output | Description |
+| --- | --- |
+| `result` | `pass`, `review`, `block` or `error` |
+| `exit-code` | `0` pass, `1` review, `2` block, `3` agent error |
+| `run-id` | Identifier of the completed run |
+| `run-dir` | Absolute path to the run directory |
+| `report-markdown` / `report-html` / `run-json` | Absolute path to each report |
+
+The job fails only when the agent could not execute, or when `blocking: 'true'`
+and a reproduced defect recommends blocking; a `review` result stays advisory.
+The report is written to the job summary either way. Commenting is skipped for
+pull requests from forks, whose tokens cannot write to the PR.
 
 ## Configuration
 
